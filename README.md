@@ -6,6 +6,7 @@ O projeto implementa um **CRUD completo** (Create, Read, Update e Delete) usando
 
  **Projeto desenvolvido ao vivo durante uma live no canal _Desvendando o Código_, com explicação passo a passo e foco didático.**
 
+# Link da live https://youtube.com/live/c4bCbxPQ23c
 ---
 
 ##  Tecnologias utilizadas
@@ -48,3 +49,4 @@ Após executar o projeto, a documentação interativa da API estará disponível
 ## http://localhost:8000/docs
 
 ## uvicorn main:app --reload
+
