@@ -1,75 +1,93 @@
-#IMPORTAR O FASTAPI 
-from fastapi import FastAPI, HTTPException
-#SERVE PARA DEFINIR O FORMADO DOS DADOS
-from pydantic import BaseModel
-#AJDUAR NA TIPAGEM
+import sqlite3
+from pathlib import Path
 from typing import List, Optional
 
-#CRIAR A API
-app  = FastAPI (title="API de Tarefas")
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 
-#MODELO DE DADOS
+app = FastAPI(titles="API de Tarefas com SQLite")
+BANCO = Path(__file__).with_name("tarefas.db")
+
 class Tarefa(BaseModel):
     id: Optional[int] = None
     titulo: str
     descricao: str
     concluida: bool = False
 
-#BANCO EM MEMORIA
-db_tarefas = []
+
+def conectar():
+    conexao = sqlite3.connect(BANCO, timeout=10)
+    conexao.row_factory = sqlite3.Row
+    return conexao
 
 
-#ROTA PARA LISTAR TODAS AS TAREFAS
-@app.get('/tarefas', response_model=List[Tarefa])
-async def listar_tarefas():
-    return db_tarefas
+def criar_tabela():
+    with conectar() as conexao:
+        conexao.execute("""
+            CREATE TABLE IF NOT EXISTS tarefas(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                titulo TEXT NOT NULL,
+                descricao TEXT NOT NULL,
+                concluida INTERGER NOT NULL DEFAULT 0
+            )        
+        """)
 
-#ROTA PARA CRIAR TAREFA
-@app.post('/tarefas', response_model=Tarefa, status_code=201)
+criar_tabela()
 
-async def criar_tarefa(tarefa: Tarefa):
-    tarefa.id = len(db_tarefas) + 1
-    db_tarefas.append(tarefa)
-    return tarefa
-
-
-#BUSCAR TAREFA POR ID
-@app.get('/tarefas/{tarefa_id}', response_model=Tarefa)
-async def obter_tarefa(tarefa_id: int):
-    for t in db_tarefas:
-        if t.id == tarefa_id:
-            return t
-    raise HTTPException(status_code=404, detail="Tarefa não encontrada")
+def converter_tarefa(linha):
+    return Tarefa(id=linha["id"],titulo=linha["titulo"],
+                  descricao=linha["descricao"], concluida=bool(linha["concluida"]))
 
 
-#ROTA PARA ALTERAR TAREFA
-@app.put('/tarefas/{tarefa_id}', response_model=Tarefa)
-async def atualizar_tarefa(tarefa_id: int, tarefa_atualizada: Tarefa):
-    for index, t in enumerate(db_tarefas):
-        if t.id == tarefa_id:
-            tarefa_atualizada.id = tarefa_id
+@app.get("/tarefas", response_model=List[Tarefa])
+def listar_tarefas():
+    with conectar() as conexao:
+        linhas = conexao.execute('SELECT * FROM tarefas ORDER BY id').fetchall()
 
-            db_tarefas[index] = tarefa_atualizada
+    return [converter_tarefa(linha) for linha in linhas]
 
-            return tarefa_atualizada
-    raise HTTPException(status_code=404, detail="Tarefa não encontrada")
 
-#ROTA PARA DELETAR
-@app.delete('/tarefas/{tarefa_id}', status_code=204)
-async def deletar_tarefa(tarefa_id: int):
-    for t in db_tarefas:
-        if t.id == tarefa_id:
-            db_tarefas.remove(t)
-            return
-    raise HTTPException(status_code=404, detail="Tarefa não encontrada")
+@app.post("/tarefas",response_model=Tarefa, status_code=201)
+def criar_tarefa(tarefa: Tarefa):
+    with conectar() as conexao:
+        cursor = conexao.execute(
+            'INSERT INTO tarefas(titulo, descricao, concluida)  VALUES (?,?,?)',
+            (tarefa.titulo, tarefa.descricao, int(tarefa.concluida)),            
+        )
+        novo_id = cursor.lastrowid
+    return  Tarefa(id=novo_id, titulo=tarefa.titulo,
+                    descricao=tarefa.descricao, concluida=tarefa.concluida)
 
 
 
+@app.get("/tarefas/{tarefa_id}", response_model=Tarefa)
+def obter_tarefa(tarefa_id: int):
+    with conectar() as conexao:
+        linha = conexao.execute("SELECT * FROM tarefas WHERE id = ?" , (tarefa_id,)).fetchone()
+    if linha is None:
+        raise HTTPException(status_code=404, detail="Tarefa não encontrada")
+    return converter_tarefa(linha)
 
 
+@app.put("/tarefas/{tarefa_id}", response_model=Tarefa)
+def atualizar_tarefa(tarefa_id: int, tarefa_atualizada: Tarefa):
+    with conectar() as conexao:
+        cursor = conexao.execute(
+            "UPDATE tarefas SET titulo = ? , descricao = ? , concluida = ? WHERE id = ?",
+            (tarefa_atualizada.titulo, tarefa_atualizada.descricao,
+            int(tarefa_atualizada.concluida), tarefa_id),
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Tarefa não encontrada")
+    return Tarefa(id=tarefa_id, titulo=tarefa_atualizada.titulo,
+                  descricao = tarefa_atualizada.descricao,
+                  concluida = tarefa_atualizada.concluida )
 
-
-
-
-
-
+@app.delete("/tarefas/{tarefa_id}", status_code=204)
+def deletar_tarefa(tarefa_id: int):
+    with conectar() as conexao:
+        cursor = conexao.execute("DELETE FROM tarefas WHERE id = ?", (tarefa_id,))
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Tarefa não encontrada")
+    
+    return None
